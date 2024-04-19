@@ -1,0 +1,185 @@
+---
+
+- name: 'Create two PVCs and install two Nginx instances using those PVCs'
+  hosts: 'k3s1'
+  gather_facts: true
+  become: false
+  module_defaults:
+    kubernetes.core.helm:
+      kubeconfig: './k3s-kubeconfig'
+    kubernetes.core.k8s:
+      kubeconfig: './k3s-kubeconfig'
+    kubernetes.core.k8s_info:
+      kubeconfig: './k3s-kubeconfig'
+    kubernetes.core.k8s_exec:
+      kubeconfig: './k3s-kubeconfig'
+
+  tasks:
+
+    #
+    # create directories for PVs
+    #
+
+    - name: 'Create directories'
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: 'directory'
+        owner: 'root'
+        group: 'root'
+        mode: '0755'
+      become: true
+      loop:
+        - '/mnt/data_nginx-pvc1'
+        - '/mnt/data_nginx-pvc2'
+
+    #
+    # nginx-pvc2
+    #
+
+    - name: 'Create PV nginx-pv2'
+      delegate_to: 'localhost'
+      kubernetes.core.k8s:
+        state: 'present'
+        resource_definition: |
+          apiVersion: v1
+          kind: PersistentVolume
+          metadata:
+            name: nginx-pv2
+          spec:
+            storageClassName: nginx-pv2
+            capacity:
+              storage: 100Mi
+            accessModes:
+              - ReadWriteOnce
+            hostPath:
+              path: "/mnt/data_nginx-pv2"
+
+    - name: 'Create PVC nginx-pvc2'
+      delegate_to: 'localhost'
+      kubernetes.core.k8s:
+        state: 'present'
+        resource_definition: |
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: nginx-pvc2
+            namespace: default
+          spec:
+            storageClassName: nginx-pv2
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 100Mi
+
+    - name: 'Install nginx-pvc2'
+      delegate_to: 'localhost'
+      kubernetes.core.helm:
+        chart_ref: 'oci://registry-1.docker.io/bitnamicharts/nginx'
+        release_name: 'nginx-pvc2'
+        release_namespace: 'default'
+        release_values:
+          staticSitePVC: 'nginx-pvc2'
+          service:
+            type: ClusterIP
+          ingress:
+            enabled: true
+            hostname: "nginx-pvc2.{{ hostvars['k3s1']['ansible_default_ipv4']['address'] }}.sslip.io"
+
+    #
+    # nginx-pvc1
+    #
+
+    - name: 'Create index.html in /mnt/data_nginx-pvc1/index.html'
+      ansible.builtin.copy:
+        dest: '/mnt/data_nginx-pvc1/index.html'
+        content: |
+          Hello from vagrant-libvirt
+        owner: 'root'
+        group: 'root'
+        mode: '0644'
+      become: true
+
+    - name: 'Create PV nginx-pv1'
+      delegate_to: 'localhost'
+      kubernetes.core.k8s:
+        state: 'present'
+        resource_definition: |
+          apiVersion: v1
+          kind: PersistentVolume
+          metadata:
+            name: nginx-pv1
+          spec:
+            storageClassName: nginx-pv1
+            capacity:
+              storage: 100Mi
+            accessModes:
+              - ReadWriteOnce
+            hostPath:
+              path: "/mnt/data_nginx-pvc1"
+
+    - name: 'Create PVC nginx-pvc1'
+      delegate_to: 'localhost'
+      kubernetes.core.k8s:
+        state: 'present'
+        resource_definition: |
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: nginx-pvc1
+            namespace: default
+          spec:
+            storageClassName: nginx-pv1
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 100Mi
+
+    - name: 'Install nginx-pvc1'
+      delegate_to: 'localhost'
+      kubernetes.core.helm:
+        chart_ref: 'oci://registry-1.docker.io/bitnamicharts/nginx'
+        release_name: 'nginx-pvc1'
+        release_namespace: 'default'
+        release_values:
+          staticSitePVC: 'nginx-pvc1'
+          service:
+            type: ClusterIP
+          ingress:
+            enabled: true
+            hostname: "nginx-pvc1.{{ hostvars['k3s1']['ansible_default_ipv4']['address'] }}.sslip.io"
+
+    - name: 'Wait until all pods are running'
+      delegate_to: 'localhost'
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: default
+      register: pod_list
+      until:
+        '
+        pod_list | json_query("resources[*].status.phase") | unique == ["Running"]
+        or
+        pod_list | json_query("resources[*].status.phase") | unique == ["Running", "Succeeded"]
+        '
+      retries: 12
+      delay: 10
+
+    - name: 'Wait for the nginx-pvc1 ingress to be reachable'
+      ansible.builtin.uri:
+        url: "http://nginx-pvc1.{{ hostvars['k3s1']['ansible_default_ipv4']['address'] }}.sslip.io"
+      register: result
+      until: "result.status == 302 or result.status == 200"
+      retries: 11
+      delay: 10
+
+    - name: 'Command to curl the nginx-pvc1 ingress'
+      ansible.builtin.debug:
+        msg: "The curl command to test the nginx-pvc1 ingress is: curl http://nginx-pvc1.{{ hostvars['k3s1']['ansible_default_ipv4']['address'] }}.sslip.io"
+      delegate_to: 'localhost'
+
+    - name: 'Command to curl the nginx-pvc2 ingress'
+      ansible.builtin.debug:
+        msg: "The curl command to test the nginx-pvc2 ingress is: curl http://nginx-pvc2.{{ hostvars['k3s1']['ansible_default_ipv4']['address'] }}.sslip.io"
+      delegate_to: 'localhost'
