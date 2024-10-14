@@ -82,6 +82,8 @@
           staticSitePVC: 'nginx-pvc2'
           service:
             type: ClusterIP
+          tls:
+            enabled: false
           ingress:
             enabled: true
             hostname: "nginx-pvc2.{{ hostvars['k3s1']['ansible_default_ipv4']['address'] }}.sslip.io"
@@ -146,6 +148,8 @@
           staticSitePVC: 'nginx-pvc1'
           service:
             type: ClusterIP
+          tls:
+            enabled: false
           ingress:
             enabled: true
             hostname: "nginx-pvc1.{{ hostvars['k3s1']['ansible_default_ipv4']['address'] }}.sslip.io"
