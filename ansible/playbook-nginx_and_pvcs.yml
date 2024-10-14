@@ -163,9 +163,9 @@
       register: pod_list
       until:
         '
-        pod_list | json_query("resources[*].status.phase") | unique == ["Running"]
+        pod_list | json_query("resources[*].status.phase") | unique | sort == ["Running"]
         or
-        pod_list | json_query("resources[*].status.phase") | unique == ["Running", "Succeeded"]
+        pod_list | json_query("resources[*].status.phase") | unique | sort == ["Running", "Succeeded"]
         '
       retries: 12
       delay: 10
